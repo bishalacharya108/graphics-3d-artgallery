@@ -58,10 +58,14 @@ std::vector<Artwork> gallery;
 // Interaction
 int nearestArtworkIndex = -1;
 bool showInfoPanel = false;
+bool showMiniMap = true;
+bool showHUD = true;
 
 // Room layout
 const float ROOM1_CENTER_X = 0.0f;
 const float ROOM2_CENTER_X = 24.0f;
+const float ROOM3_CENTER_X = 48.0f;
+
 const float ROOM_HALF_W    = 10.0f;
 const float ROOM_HALF_D    = 10.0f;
 const float ROOM_H         = 6.0f;
@@ -73,7 +77,7 @@ const float DOOR_TOP = 4.4f;
 
 // -------------------- Data --------------------
 
-std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
+std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 15) {
     std::ifstream file(path);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open JSON file: " + path);
@@ -83,10 +87,9 @@ std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
     file >> j;
 
     std::vector<Artwork> result;
-    int count = 0;
 
     for (const auto& item : j) {
-        if (count >= maxItems) break;
+        if ((int)result.size() >= maxItems) break;
 
         Artwork art;
         art.id = item.value("id", 0);
@@ -106,7 +109,6 @@ std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
         }
 
         result.push_back(art);
-        count++;
     }
 
     return result;
@@ -148,8 +150,7 @@ GLuint loadTexture(const char* path) {
 }
 
 void prepareArtworks() {
-    const float room1Positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
-    const float room2Positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
+    const float positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
 
     for (size_t i = 0; i < gallery.size(); i++) {
         Artwork& art = gallery[i];
@@ -178,14 +179,16 @@ void prepareArtworks() {
 
         if (i < 5) {
             art.room = 1;
-            art.x = ROOM1_CENTER_X + room1Positions[i];
-            art.z = -9.95f;
-        } else {
+            art.x = ROOM1_CENTER_X + positions[i];
+        } else if (i < 10) {
             art.room = 2;
-            art.x = ROOM2_CENTER_X + room2Positions[i - 5];
-            art.z = -9.95f;
+            art.x = ROOM2_CENTER_X + positions[i - 5];
+        } else {
+            art.room = 3;
+            art.x = ROOM3_CENTER_X + positions[i - 10];
         }
 
+        art.z = -9.95f;
         art.textureID = loadTexture(art.image.c_str());
     }
 }
@@ -251,8 +254,12 @@ std::string truncateLine(const std::string& s, size_t maxLen = 42) {
 
 std::string currentRoomName() {
     if (camX < 10.0f) return "Landscape Hall";
-    if (camX > 14.0f) return "Architecture Hall";
-    return "Connecting Corridor";
+    if (camX < 34.0f) {
+        if (camX <= 14.0f) return "Corridor 1";
+        return "Architecture Hall";
+    }
+    if (camX <= 38.0f) return "Corridor 2";
+    return "Space Hall";
 }
 
 // -------------------- Room geometry --------------------
@@ -306,9 +313,9 @@ void drawBaseTrim(float cx) {
     drawQuad(right - 0.02f, 0.0f, ROOM_HALF_D, right - 0.02f, 0.0f, -ROOM_HALF_D, right - 0.02f, 0.25f, -ROOM_HALF_D, right - 0.02f, 0.25f, ROOM_HALF_D);
 }
 
-void drawRoomShellRoom1() {
-    float left   = ROOM1_CENTER_X - ROOM_HALF_W;
-    float right  = ROOM1_CENTER_X + ROOM_HALF_W;
+void drawRoomShell(float cx, bool doorLeft, bool doorRight) {
+    float left   = cx - ROOM_HALF_W;
+    float right  = cx + ROOM_HALF_W;
 
     glColor3f(0.68f, 0.68f, 0.66f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
@@ -319,39 +326,23 @@ void drawRoomShellRoom1() {
     glColor3f(0.90f, 0.89f, 0.84f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    glColor3f(0.91f, 0.90f, 0.86f);
-    drawLeftWallSolid(ROOM1_CENTER_X);
+    if (doorLeft) drawLeftWallWithDoor(cx);
+    else {
+        glColor3f(0.91f, 0.90f, 0.86f);
+        drawLeftWallSolid(cx);
+    }
 
-    drawRightWallWithDoor(ROOM1_CENTER_X);
-    drawFrontWallWithOpening(ROOM1_CENTER_X);
-    drawBaseTrim(ROOM1_CENTER_X);
+    if (doorRight) drawRightWallWithDoor(cx);
+    else {
+        glColor3f(0.91f, 0.90f, 0.86f);
+        drawRightWallSolid(cx);
+    }
+
+    drawFrontWallWithOpening(cx);
+    drawBaseTrim(cx);
 }
 
-void drawRoomShellRoom2() {
-    float left   = ROOM2_CENTER_X - ROOM_HALF_W;
-    float right  = ROOM2_CENTER_X + ROOM_HALF_W;
-
-    glColor3f(0.68f, 0.68f, 0.66f);
-    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
-
-    glColor3f(0.95f, 0.95f, 0.93f);
-    drawQuad(left, ROOM_H, ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
-
-    glColor3f(0.90f, 0.89f, 0.84f);
-    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
-
-    drawLeftWallWithDoor(ROOM2_CENTER_X);
-
-    glColor3f(0.91f, 0.90f, 0.86f);
-    drawRightWallSolid(ROOM2_CENTER_X);
-
-    drawFrontWallWithOpening(ROOM2_CENTER_X);
-    drawBaseTrim(ROOM2_CENTER_X);
-}
-
-void drawConnectingCorridor() {
-    float leftX = ROOM1_CENTER_X + ROOM_HALF_W;
-    float rightX = ROOM2_CENTER_X - ROOM_HALF_W;
+void drawConnectingCorridor(float leftX, float rightX) {
     float z1 = DOOR_Z1;
     float z2 = DOOR_Z2;
 
@@ -367,12 +358,51 @@ void drawConnectingCorridor() {
 }
 
 void drawRoom() {
-    drawRoomShellRoom1();
-    drawRoomShellRoom2();
-    drawConnectingCorridor();
+    drawRoomShell(ROOM1_CENTER_X, false, true);
+    drawRoomShell(ROOM2_CENTER_X, true, true);
+    drawRoomShell(ROOM3_CENTER_X, true, false);
+
+    drawConnectingCorridor(ROOM1_CENTER_X + ROOM_HALF_W, ROOM2_CENTER_X - ROOM_HALF_W);
+    drawConnectingCorridor(ROOM2_CENTER_X + ROOM_HALF_W, ROOM3_CENTER_X - ROOM_HALF_W);
 
     drawPedestal(ROOM1_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
     drawPedestal(ROOM2_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
+    drawPedestal(ROOM3_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
+}
+
+// -------------------- Extra polish --------------------
+
+void drawPaintingSpotlights() {
+    glDisable(GL_TEXTURE_2D);
+
+    for (const auto& art : gallery) {
+        glColor3f(0.95f, 0.92f, 0.70f);
+        float lx1 = art.x - 0.35f;
+        float lx2 = art.x + 0.35f;
+        float ly1 = art.y + art.drawHeight / 2.0f + 0.25f;
+        float ly2 = ly1 + 0.10f;
+        float lz  = art.z + 0.03f;
+
+        drawQuad(lx1, ly1, lz, lx2, ly1, lz, lx2, ly2, lz, lx1, ly2, lz);
+
+        glColor3f(0.30f, 0.26f, 0.18f);
+        float fx1 = art.x - 0.9f;
+        float fx2 = art.x + 0.9f;
+        float fz1 = -8.3f;
+        float fz2 = -7.8f;
+        float fy  = 0.01f;
+
+        drawQuad(fx1, fy, fz1, fx2, fy, fz1, fx2, fy, fz2, fx1, fy, fz2);
+    }
+}
+
+void drawCorridorSigns() {
+    glColor3f(0.90f, 0.85f, 0.50f);
+    drawText3D(8.8f, 3.4f, 5.0f, "To Architecture Hall ->", 0.0017f);
+    drawText3D(15.0f, 3.4f, 5.0f, "<- To Landscape Hall", 0.0017f);
+
+    drawText3D(32.8f, 3.4f, 5.0f, "To Space Hall ->", 0.0017f);
+    drawText3D(39.0f, 3.4f, 5.0f, "<- To Architecture Hall", 0.0017f);
 }
 
 // -------------------- Interaction --------------------
@@ -467,36 +497,24 @@ void drawRoomTitles() {
 
     drawText3D(ROOM1_CENTER_X - 3.0f, 4.9f, 9.7f, "Landscape Hall", 0.0023f);
     drawText3D(ROOM2_CENTER_X - 3.5f, 4.9f, 9.7f, "Architecture Hall", 0.0023f);
+    drawText3D(ROOM3_CENTER_X - 2.5f, 4.9f, 9.7f, "Space Hall", 0.0023f);
 }
 
 // -------------------- Overlay --------------------
-void worldToMiniMap(float worldX, float worldZ,
-                    float mapX, float mapY,
-                    float worldMinX, float worldMaxX,
-                    float worldMinZ, float worldMaxZ,
-                    float mapW, float mapH,
-                    float& outX, float& outY) {
-    float nx = (worldX - worldMinX) / (worldMaxX - worldMinX);
-    float nz = (worldZ - worldMinZ) / (worldMaxZ - worldMinZ);
-
-    outX = mapX + nx * mapW;
-    outY = mapY + mapH - (nz * mapH);
-}
-
 
 void drawMiniMap() {
-    const float mapW = 260.0f;
+    if (!showMiniMap) return;
+
+    const float mapW = 320.0f;
     const float mapH = 140.0f;
     const float mapX = windowWidth - mapW - 20.0f;
     const float mapY = windowHeight - mapH - 20.0f;
 
-    // World bounds covering the whole museum
     const float worldMinX = -10.0f;
-    const float worldMaxX = 34.0f;
+    const float worldMaxX = 58.0f;
     const float worldMinZ = -10.0f;
     const float worldMaxZ = 10.0f;
 
-    // Background
     glColor3f(0.08f, 0.08f, 0.10f);
     glBegin(GL_QUADS);
         glVertex2f(mapX, mapY);
@@ -508,10 +526,17 @@ void drawMiniMap() {
     glColor3f(0.85f, 0.85f, 0.85f);
     glLineWidth(2.0f);
 
+    auto worldToMiniMap = [&](float worldX, float worldZ, float& outX, float& outY) {
+        float nx = (worldX - worldMinX) / (worldMaxX - worldMinX);
+        float nz = (worldZ - worldMinZ) / (worldMaxZ - worldMinZ);
+        outX = mapX + nx * mapW;
+        outY = mapY + mapH - (nz * mapH);
+    };
+
     auto drawWorldRect = [&](float x1, float z1, float x2, float z2) {
         float sx1, sy1, sx2, sy2;
-        worldToMiniMap(x1, z1, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, sx1, sy1);
-        worldToMiniMap(x2, z2, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, sx2, sy2);
+        worldToMiniMap(x1, z1, sx1, sy1);
+        worldToMiniMap(x2, z2, sx2, sy2);
 
         float left   = std::min(sx1, sx2);
         float right  = std::max(sx1, sx2);
@@ -526,59 +551,54 @@ void drawMiniMap() {
         glEnd();
     };
 
-    // Room 1 outline: x [-10, 10], z [-10, 10]
-    drawWorldRect(-10.0f, -10.0f, 10.0f, 10.0f);
+    drawWorldRect(-10.0f, -10.0f, 10.0f, 10.0f);    // Room 1
+    drawWorldRect(10.0f, DOOR_Z1, 14.0f, DOOR_Z2);  // Corridor 1
+    drawWorldRect(14.0f, -10.0f, 34.0f, 10.0f);     // Room 2
+    drawWorldRect(34.0f, DOOR_Z1, 38.0f, DOOR_Z2);  // Corridor 2
+    drawWorldRect(38.0f, -10.0f, 58.0f, 10.0f);     // Room 3
 
-    // Corridor outline: x [10, 14], z [DOOR_Z1, DOOR_Z2]
-    drawWorldRect(10.0f, DOOR_Z1, 14.0f, DOOR_Z2);
-
-    // Room 2 outline: x [14, 34], z [-10, 10]
-    drawWorldRect(14.0f, -10.0f, 34.0f, 10.0f);
-
-    // Pedestals
     glColor3f(0.65f, 0.65f, 0.65f);
     drawWorldRect(-1.0f, -2.5f, 1.0f, -0.5f);
     drawWorldRect(23.0f, -2.5f, 25.0f, -0.5f);
+    drawWorldRect(47.0f, -2.5f, 49.0f, -0.5f);
 
-    // Player dot
+    glColor3f(0.35f, 0.75f, 1.0f);
+    glPointSize(5.0f);
+    glBegin(GL_POINTS);
+    for (size_t i = 0; i < gallery.size(); i++) {
+        float ax, ay;
+        worldToMiniMap(gallery[i].x, gallery[i].z, ax, ay);
+        glVertex2f(ax, ay);
+    }
+    glEnd();
+
+    if (nearestArtworkIndex >= 0) {
+        float ax, ay;
+        worldToMiniMap(gallery[nearestArtworkIndex].x, gallery[nearestArtworkIndex].z, ax, ay);
+        glColor3f(0.20f, 0.95f, 0.30f);
+        glPointSize(8.0f);
+        glBegin(GL_POINTS);
+            glVertex2f(ax, ay);
+        glEnd();
+    }
+
     float px, py;
-    worldToMiniMap(camX, camZ, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, px, py);
-
+    worldToMiniMap(camX, camZ, px, py);
     glColor3f(0.95f, 0.30f, 0.30f);
     glPointSize(8.0f);
     glBegin(GL_POINTS);
         glVertex2f(px, py);
     glEnd();
 
-    // Facing direction
     glColor3f(0.95f, 0.90f, 0.40f);
     glBegin(GL_LINES);
         glVertex2f(px, py);
         glVertex2f(px + std::sin(camYaw) * 12.0f, py - std::cos(camYaw) * 12.0f);
     glEnd();
 
-    // Nearest artwork dot
-    if (nearestArtworkIndex >= 0) {
-        float ax, ay;
-        worldToMiniMap(
-            gallery[nearestArtworkIndex].x,
-            gallery[nearestArtworkIndex].z,
-            mapX, mapY,
-            worldMinX, worldMaxX,
-            worldMinZ, worldMaxZ,
-            mapW, mapH,
-            ax, ay
-        );
-
-        glColor3f(0.20f, 0.95f, 0.30f);
-        glPointSize(7.0f);
-        glBegin(GL_POINTS);
-            glVertex2f(ax, ay);
-        glEnd();
-    }
-
     glColor3f(1.0f, 1.0f, 1.0f);
     drawBitmapText2D(mapX + 10.0f, mapY + mapH - 18.0f, "Mini Map");
+    drawBitmapText2D(mapX + 10.0f, mapY + 16.0f, "Blue=art  Green=nearest  Red=you");
 }
 
 void drawInfoPanel() {
@@ -588,33 +608,35 @@ void drawInfoPanel() {
 
     glColor3f(0.08f, 0.08f, 0.10f);
     glBegin(GL_QUADS);
-        glVertex2f(700.0f, 500.0f);
+        glVertex2f(680.0f, 500.0f);
         glVertex2f(1160.0f, 500.0f);
         glVertex2f(1160.0f, 770.0f);
-        glVertex2f(700.0f, 770.0f);
+        glVertex2f(680.0f, 770.0f);
     glEnd();
 
     glColor3f(0.95f, 0.85f, 0.35f);
     glLineWidth(2.0f);
     glBegin(GL_LINE_LOOP);
-        glVertex2f(700.0f, 500.0f);
+        glVertex2f(680.0f, 500.0f);
         glVertex2f(1160.0f, 500.0f);
         glVertex2f(1160.0f, 770.0f);
-        glVertex2f(700.0f, 770.0f);
+        glVertex2f(680.0f, 770.0f);
     glEnd();
 
     glColor3f(1.0f, 1.0f, 1.0f);
-    drawBitmapText2D(720.0f, 740.0f, "Artwork Details");
-    drawBitmapText2D(720.0f, 705.0f, "Title: " + art.title);
-    drawBitmapText2D(720.0f, 675.0f, "Category: " + art.category);
-    drawBitmapText2D(720.0f, 645.0f, "Source: " + art.source);
-    drawBitmapText2D(720.0f, 615.0f, "License: " + art.license);
-    drawBitmapText2D(720.0f, 585.0f, "Room: " + std::to_string(art.room));
-    drawBitmapText2D(720.0f, 555.0f, "Description: " + truncateLine(art.description, 40));
-    drawBitmapText2D(720.0f, 525.0f, "Press E to close");
+    drawBitmapText2D(700.0f, 740.0f, "Artwork Details");
+    drawBitmapText2D(700.0f, 705.0f, "Title: " + art.title);
+    drawBitmapText2D(700.0f, 675.0f, "Category: " + art.category);
+    drawBitmapText2D(700.0f, 645.0f, "Source: " + art.source);
+    drawBitmapText2D(700.0f, 615.0f, "License: " + art.license);
+    drawBitmapText2D(700.0f, 585.0f, "Room: " + std::to_string(art.room));
+    drawBitmapText2D(700.0f, 555.0f, "Description: " + truncateLine(art.description, 42));
+    drawBitmapText2D(700.0f, 525.0f, "Press E to close");
 }
 
 void drawOverlay() {
+    if (!showHUD && !showMiniMap && !showInfoPanel) return;
+
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
@@ -625,26 +647,28 @@ void drawOverlay() {
     glLoadIdentity();
 
     glDisable(GL_DEPTH_TEST);
-    glColor3f(1.0f, 1.0f, 1.0f);
 
-    drawBitmapText2D(20.0f, windowHeight - 30.0f, "WASD: move   J/L: turn   E: inspect artwork   ESC: quit");
-    drawBitmapText2D(20.0f, windowHeight - 55.0f, "Current Room: " + currentRoomName());
+    if (showHUD) {
+        glColor3f(1.0f, 1.0f, 1.0f);
 
-    if (nearestArtworkIndex >= 0) {
-        std::string msg = "Nearest: " + truncateTitle(gallery[nearestArtworkIndex].title, 28);
-        drawBitmapText2D(20.0f, windowHeight - 80.0f, msg);
-        if (!showInfoPanel) {
-            drawBitmapText2D(20.0f, windowHeight - 105.0f, "Press E to inspect");
+        drawBitmapText2D(20.0f, windowHeight - 30.0f, "WASD: move   J/L: turn   E: inspect   M: minimap   H: HUD   ESC: quit");
+        drawBitmapText2D(20.0f, windowHeight - 55.0f, "Current Room: " + currentRoomName());
+
+        if (nearestArtworkIndex >= 0) {
+            std::string msg = "Nearest: " + truncateTitle(gallery[nearestArtworkIndex].title, 28);
+            drawBitmapText2D(20.0f, windowHeight - 80.0f, msg);
+            if (!showInfoPanel) {
+                drawBitmapText2D(20.0f, windowHeight - 105.0f, "Press E to inspect");
+            }
         }
-    }
 
-    // crosshair
-    float cx = windowWidth / 2.0f;
-    float cy = windowHeight / 2.0f;
-    glBegin(GL_LINES);
-        glVertex2f(cx - 8.0f, cy); glVertex2f(cx + 8.0f, cy);
-        glVertex2f(cx, cy - 8.0f); glVertex2f(cx, cy + 8.0f);
-    glEnd();
+        float cx = windowWidth / 2.0f;
+        float cy = windowHeight / 2.0f;
+        glBegin(GL_LINES);
+            glVertex2f(cx - 8.0f, cy); glVertex2f(cx + 8.0f, cy);
+            glVertex2f(cx, cy - 8.0f); glVertex2f(cx, cy + 8.0f);
+        glEnd();
+    }
 
     drawMiniMap();
     drawInfoPanel();
@@ -671,6 +695,8 @@ void display() {
     gluLookAt(camX, camY, camZ, lookX, camY, lookZ, 0.0f, 1.0f, 0.0f);
 
     drawRoom();
+    drawPaintingSpotlights();
+    drawCorridorSigns();
     drawPaintings();
     drawPaintingLabels();
     drawRoomTitles();
@@ -687,30 +713,31 @@ void reshape(int w, int h) {
     glViewport(0, 0, w, h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(65.0f, static_cast<float>(w) / static_cast<float>(h), 0.1f, 150.0f);
+    gluPerspective(65.0f, static_cast<float>(w) / static_cast<float>(h), 0.1f, 220.0f);
     glMatrixMode(GL_MODELVIEW);
 }
 
 void clampCamera() {
-    // Overall museum bounds
     if (camX < -8.7f) camX = -8.7f;
-    if (camX > 32.7f) camX = 32.7f;
+    if (camX > 56.7f) camX = 56.7f;
     if (camZ < -8.0f) camZ = -8.0f;
     if (camZ > 8.7f) camZ = 8.7f;
 
-    // Pedestal collision room 1
+    // Pedestals
     if (camX > -1.5f && camX < 1.5f && camZ > -3.0f && camZ < 0.3f) {
         camX = prevCamX;
         camZ = prevCamZ;
     }
-
-    // Pedestal collision room 2
     if (camX > 22.5f && camX < 25.5f && camZ > -3.0f && camZ < 0.3f) {
         camX = prevCamX;
         camZ = prevCamZ;
     }
+    if (camX > 46.5f && camX < 49.5f && camZ > -3.0f && camZ < 0.3f) {
+        camX = prevCamX;
+        camZ = prevCamZ;
+    }
 
-    // Wall between Room 1 and corridor at x ~= 10, except doorway
+    // Room1 -> Corridor1 wall at x ~ 10
     if (camX > 9.6f && camX < 10.4f) {
         if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
             camX = prevCamX;
@@ -718,7 +745,7 @@ void clampCamera() {
         }
     }
 
-    // Wall between corridor and Room 2 at x ~= 14, except doorway
+    // Corridor1 -> Room2 wall at x ~ 14
     if (camX > 13.6f && camX < 14.4f) {
         if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
             camX = prevCamX;
@@ -726,8 +753,32 @@ void clampCamera() {
         }
     }
 
-    // Corridor side walls
+    // Room2 -> Corridor2 wall at x ~ 34
+    if (camX > 33.6f && camX < 34.4f) {
+        if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
+    }
+
+    // Corridor2 -> Room3 wall at x ~ 38
+    if (camX > 37.6f && camX < 38.4f) {
+        if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
+    }
+
+    // Corridor 1 side walls
     if (camX >= 10.0f && camX <= 14.0f) {
+        if (camZ < DOOR_Z1 + 0.2f || camZ > DOOR_Z2 - 0.2f) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
+    }
+
+    // Corridor 2 side walls
+    if (camX >= 34.0f && camX <= 38.0f) {
         if (camZ < DOOR_Z1 + 0.2f || camZ > DOOR_Z2 - 0.2f) {
             camX = prevCamX;
             camZ = prevCamZ;
@@ -792,6 +843,17 @@ void keyboardDown(unsigned char key, int, int) {
                 showInfoPanel = !showInfoPanel;
             }
             break;
+
+        case 'm':
+        case 'M':
+            showMiniMap = !showMiniMap;
+            break;
+
+        case 'h':
+        case 'H':
+            showHUD = !showHUD;
+            break;
+
         case 27:
             std::exit(0);
     }
@@ -807,11 +869,11 @@ void init() {
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
 
-    gallery = loadGallery("data/gallery.json", 10);
+    gallery = loadGallery("data/gallery.json", 15);
     prepareArtworks();
 
     std::cout << "Prepared " << gallery.size() << " paintings.\n";
-    std::cout << "Walk right to move from Room 1 to Room 2.\n";
+    std::cout << "Explore three connected rooms.\n";
     std::cout << "Press E near a painting to inspect it.\n";
 }
 
@@ -820,7 +882,7 @@ int main(int argc, char** argv) {
         glutInit(&argc, argv);
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
         glutInitWindowSize(windowWidth, windowHeight);
-        glutCreateWindow("3D Art Gallery - Polished");
+        glutCreateWindow("3D Art Gallery - Three Rooms");
 
         init();
 
