@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -40,8 +41,16 @@ float camY = 2.0f;
 float camZ = 6.5f;
 float camYaw = 0.0f;
 
+// Previous camera position for collision rollback
+float prevCamX = 0.0f;
+float prevCamZ = 6.5f;
+
 // Gallery
 std::vector<Artwork> gallery;
+
+// Interaction
+int nearestArtworkIndex = -1;
+bool showInfoPanel = false;
 
 // Room layout
 const float ROOM1_CENTER_X = 0.0f;
@@ -54,6 +63,8 @@ const float ROOM_H         = 6.0f;
 const float DOOR_Z1 = -4.0f;
 const float DOOR_Z2 =  4.0f;
 const float DOOR_TOP = 4.4f;
+
+// -------------------- Data --------------------
 
 std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
     std::ifstream file(path);
@@ -80,6 +91,12 @@ std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
         art.height = item.value("height", 0);
         art.source = item.value("source", "Unknown");
         art.license = item.value("license", "public_domain");
+
+        std::ifstream imgTest(art.image);
+        if (!imgTest.good()) {
+            std::cout << "Skipping missing image: " << art.image << "\n";
+            continue;
+        }
 
         result.push_back(art);
         count++;
@@ -166,6 +183,8 @@ void prepareArtworks() {
     }
 }
 
+// -------------------- Drawing helpers --------------------
+
 void drawQuad(float x1, float y1, float z1,
               float x2, float y2, float z2,
               float x3, float y3, float z3,
@@ -195,6 +214,30 @@ void drawPedestal(float cx, float cy, float cz, float w, float h, float d) {
     drawQuad(x1, y2, z1, x2, y2, z1, x2, y2, z2, x1, y2, z2);
 }
 
+void drawText3D(float x, float y, float z, const std::string& text, float scale = 0.0018f) {
+    glPushMatrix();
+    glTranslatef(x, y, z);
+    glScalef(scale, scale, scale);
+    for (char c : text) {
+        glutStrokeCharacter(GLUT_STROKE_ROMAN, c);
+    }
+    glPopMatrix();
+}
+
+void drawBitmapText2D(float x, float y, const std::string& text) {
+    glRasterPos2f(x, y);
+    for (char c : text) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
+    }
+}
+
+std::string truncateTitle(const std::string& s, size_t maxLen = 18) {
+    if (s.size() <= maxLen) return s;
+    return s.substr(0, maxLen - 3) + "...";
+}
+
+// -------------------- Room geometry --------------------
+
 void drawFrontWallWithOpening(float cx) {
     float left   = cx - ROOM_HALF_W;
     float right  = cx + ROOM_HALF_W;
@@ -220,11 +263,8 @@ void drawRightWallWithDoor(float cx) {
     float x = cx + ROOM_HALF_W;
 
     glColor3f(0.91f, 0.90f, 0.86f);
-    // lower front section
     drawQuad(x, 0.0f, ROOM_HALF_D, x, 0.0f, DOOR_Z2, x, ROOM_H, DOOR_Z2, x, ROOM_H, ROOM_HALF_D);
-    // lower back section
     drawQuad(x, 0.0f, DOOR_Z1, x, 0.0f, -ROOM_HALF_D, x, ROOM_H, -ROOM_HALF_D, x, ROOM_H, DOOR_Z1);
-    // top above doorway
     drawQuad(x, DOOR_TOP, DOOR_Z1, x, DOOR_TOP, DOOR_Z2, x, ROOM_H, DOOR_Z2, x, ROOM_H, DOOR_Z1);
 }
 
@@ -232,11 +272,8 @@ void drawLeftWallWithDoor(float cx) {
     float x = cx - ROOM_HALF_W;
 
     glColor3f(0.91f, 0.90f, 0.86f);
-    // lower back section
     drawQuad(x, 0.0f, -ROOM_HALF_D, x, 0.0f, DOOR_Z1, x, ROOM_H, DOOR_Z1, x, ROOM_H, -ROOM_HALF_D);
-    // lower front section
     drawQuad(x, 0.0f, DOOR_Z2, x, 0.0f, ROOM_HALF_D, x, ROOM_H, ROOM_HALF_D, x, ROOM_H, DOOR_Z2);
-    // top above doorway
     drawQuad(x, DOOR_TOP, DOOR_Z2, x, DOOR_TOP, DOOR_Z1, x, ROOM_H, DOOR_Z1, x, ROOM_H, DOOR_Z2);
 }
 
@@ -254,29 +291,20 @@ void drawRoomShellRoom1() {
     float left   = ROOM1_CENTER_X - ROOM_HALF_W;
     float right  = ROOM1_CENTER_X + ROOM_HALF_W;
 
-    // Floor
     glColor3f(0.68f, 0.68f, 0.66f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
 
-    // Ceiling
     glColor3f(0.95f, 0.95f, 0.93f);
     drawQuad(left, ROOM_H, ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    // Back wall
     glColor3f(0.90f, 0.89f, 0.84f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    // Left wall solid
     glColor3f(0.91f, 0.90f, 0.86f);
     drawLeftWallSolid(ROOM1_CENTER_X);
 
-    // Right wall with side doorway
     drawRightWallWithDoor(ROOM1_CENTER_X);
-
-    // Front wall with opening
     drawFrontWallWithOpening(ROOM1_CENTER_X);
-
-    // Trim
     drawBaseTrim(ROOM1_CENTER_X);
 }
 
@@ -284,29 +312,21 @@ void drawRoomShellRoom2() {
     float left   = ROOM2_CENTER_X - ROOM_HALF_W;
     float right  = ROOM2_CENTER_X + ROOM_HALF_W;
 
-    // Floor
     glColor3f(0.68f, 0.68f, 0.66f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
 
-    // Ceiling
     glColor3f(0.95f, 0.95f, 0.93f);
     drawQuad(left, ROOM_H, ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    // Back wall
     glColor3f(0.90f, 0.89f, 0.84f);
     drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    // Left wall with side doorway
     drawLeftWallWithDoor(ROOM2_CENTER_X);
 
-    // Right wall solid
     glColor3f(0.91f, 0.90f, 0.86f);
     drawRightWallSolid(ROOM2_CENTER_X);
 
-    // Front wall with opening
     drawFrontWallWithOpening(ROOM2_CENTER_X);
-
-    // Trim
     drawBaseTrim(ROOM2_CENTER_X);
 }
 
@@ -316,19 +336,14 @@ void drawConnectingCorridor() {
     float z1 = DOOR_Z1;
     float z2 = DOOR_Z2;
 
-    // floor
     glColor3f(0.66f, 0.66f, 0.64f);
     drawQuad(leftX, 0.0f, z1, rightX, 0.0f, z1, rightX, 0.0f, z2, leftX, 0.0f, z2);
 
-    // ceiling
     glColor3f(0.94f, 0.94f, 0.92f);
     drawQuad(leftX, ROOM_H, z2, rightX, ROOM_H, z2, rightX, ROOM_H, z1, leftX, ROOM_H, z1);
 
-    // corridor front side wall
     glColor3f(0.90f, 0.89f, 0.85f);
     drawQuad(leftX, 0.0f, z2, rightX, 0.0f, z2, rightX, ROOM_H, z2, leftX, ROOM_H, z2);
-
-    // corridor back side wall
     drawQuad(rightX, 0.0f, z1, leftX, 0.0f, z1, leftX, ROOM_H, z1, rightX, ROOM_H, z1);
 }
 
@@ -341,14 +356,47 @@ void drawRoom() {
     drawPedestal(ROOM2_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
 }
 
-void drawFrameBack(float centerX, float centerY, float z, float w, float h) {
+// -------------------- Interaction --------------------
+
+float distanceToArtwork(const Artwork& art) {
+    float dx = camX - art.x;
+    float dz = camZ - art.z;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
+void updateNearestArtwork() {
+    nearestArtworkIndex = -1;
+    float bestDist = std::numeric_limits<float>::max();
+
+    for (size_t i = 0; i < gallery.size(); i++) {
+        float d = distanceToArtwork(gallery[i]);
+        if (d < bestDist) {
+            bestDist = d;
+            nearestArtworkIndex = static_cast<int>(i);
+        }
+    }
+
+    if (bestDist > 6.0f) {
+        nearestArtworkIndex = -1;
+    }
+}
+
+// -------------------- Art + labels --------------------
+
+void drawFrameBack(float centerX, float centerY, float z, float w, float h, bool highlighted) {
     float x1 = centerX - w / 2.0f;
     float x2 = centerX + w / 2.0f;
     float y1 = centerY - h / 2.0f;
     float y2 = centerY + h / 2.0f;
 
-    glColor3f(0.35f, 0.20f, 0.10f);
-    glLineWidth(4.0f);
+    if (highlighted) {
+        glColor3f(1.0f, 0.85f, 0.20f);
+        glLineWidth(6.0f);
+    } else {
+        glColor3f(0.35f, 0.20f, 0.10f);
+        glLineWidth(4.0f);
+    }
+
     glBegin(GL_LINE_LOOP);
         glVertex3f(x1, y1, z + 0.002f);
         glVertex3f(x2, y1, z + 0.002f);
@@ -360,7 +408,8 @@ void drawFrameBack(float centerX, float centerY, float z, float w, float h) {
 void drawPaintings() {
     glEnable(GL_TEXTURE_2D);
 
-    for (const auto& art : gallery) {
+    for (size_t i = 0; i < gallery.size(); i++) {
+        const auto& art = gallery[i];
         if (art.textureID == 0) continue;
 
         float x1 = art.x - art.drawWidth / 2.0f;
@@ -379,13 +428,116 @@ void drawPaintings() {
         glEnd();
 
         glBindTexture(GL_TEXTURE_2D, 0);
-        drawFrameBack(art.x, art.y, art.z, art.drawWidth, art.drawHeight);
+        drawFrameBack(art.x, art.y, art.z, art.drawWidth, art.drawHeight, static_cast<int>(i) == nearestArtworkIndex);
     }
 
     glDisable(GL_TEXTURE_2D);
 }
 
+void drawPaintingLabels() {
+    glColor3f(0.15f, 0.10f, 0.08f);
+
+    for (const auto& art : gallery) {
+        std::string shortTitle = truncateTitle(art.title, 18);
+        drawText3D(art.x - 1.0f, art.y - art.drawHeight / 2.0f - 0.45f, art.z + 0.01f, shortTitle, 0.0015f);
+    }
+}
+
+void drawRoomTitles() {
+    glColor3f(0.20f, 0.16f, 0.12f);
+
+    drawText3D(ROOM1_CENTER_X - 3.0f, 4.9f, 9.7f, "Landscape Hall", 0.0023f);
+    drawText3D(ROOM2_CENTER_X - 3.5f, 4.9f, 9.7f, "Architecture Hall", 0.0023f);
+}
+
+// -------------------- Overlay --------------------
+
+void drawInfoPanel() {
+    if (!showInfoPanel || nearestArtworkIndex < 0) return;
+
+    const Artwork& art = gallery[nearestArtworkIndex];
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 1200, 0, 800);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+
+    glColor3f(0.08f, 0.08f, 0.10f);
+    glBegin(GL_QUADS);
+        glVertex2f(720.0f, 540.0f);
+        glVertex2f(1160.0f, 540.0f);
+        glVertex2f(1160.0f, 770.0f);
+        glVertex2f(720.0f, 770.0f);
+    glEnd();
+
+    glColor3f(0.95f, 0.85f, 0.35f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+        glVertex2f(720.0f, 540.0f);
+        glVertex2f(1160.0f, 540.0f);
+        glVertex2f(1160.0f, 770.0f);
+        glVertex2f(720.0f, 770.0f);
+    glEnd();
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawBitmapText2D(740.0f, 740.0f, "Artwork Details");
+    drawBitmapText2D(740.0f, 705.0f, "Title: " + art.title);
+    drawBitmapText2D(740.0f, 675.0f, "Category: " + art.category);
+    drawBitmapText2D(740.0f, 645.0f, "Source: " + art.source);
+    drawBitmapText2D(740.0f, 615.0f, "License: " + art.license);
+    drawBitmapText2D(740.0f, 585.0f, "Room: " + std::to_string(art.room));
+    drawBitmapText2D(740.0f, 555.0f, "Press E to close");
+
+    glEnable(GL_DEPTH_TEST);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void drawOverlay() {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 1200, 0, 800);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    drawBitmapText2D(20.0f, 770.0f, "WASD: move   J/L: turn   E: inspect artwork   ESC: quit");
+    drawBitmapText2D(20.0f, 745.0f, "Room 1: Landscapes   Room 2: Architecture");
+
+    if (nearestArtworkIndex >= 0) {
+        std::string msg = "Nearest: " + truncateTitle(gallery[nearestArtworkIndex].title, 28);
+        drawBitmapText2D(20.0f, 720.0f, msg);
+    }
+
+    glEnable(GL_DEPTH_TEST);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+
+    drawInfoPanel();
+}
+
+// -------------------- Main render --------------------
+
 void display() {
+    updateNearestArtwork();
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
 
@@ -396,6 +548,9 @@ void display() {
 
     drawRoom();
     drawPaintings();
+    drawPaintingLabels();
+    drawRoomTitles();
+    drawOverlay();
 
     glutSwapBuffers();
 }
@@ -411,27 +566,55 @@ void reshape(int w, int h) {
 }
 
 void clampCamera() {
+    // Overall museum bounds
     if (camX < -8.7f) camX = -8.7f;
     if (camX > 32.7f) camX = 32.7f;
     if (camZ < -8.0f) camZ = -8.0f;
     if (camZ > 8.7f) camZ = 8.7f;
 
-    // pedestal room 1
+    // Pedestal collision room 1
     if (camX > -1.5f && camX < 1.5f && camZ > -3.0f && camZ < 0.3f) {
-        if (camZ < -1.35f) camZ = -3.0f;
-        else camZ = 0.3f;
+        camX = prevCamX;
+        camZ = prevCamZ;
     }
 
-    // pedestal room 2
+    // Pedestal collision room 2
     if (camX > 22.5f && camX < 25.5f && camZ > -3.0f && camZ < 0.3f) {
-        if (camZ < -1.35f) camZ = -3.0f;
-        else camZ = 0.3f;
+        camX = prevCamX;
+        camZ = prevCamZ;
+    }
+
+    // Wall between Room 1 and corridor at x ~= 10, except doorway
+    if (camX > 9.6f && camX < 10.4f) {
+        if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
+    }
+
+    // Wall between corridor and Room 2 at x ~= 14, except doorway
+    if (camX > 13.6f && camX < 14.4f) {
+        if (camZ < DOOR_Z1 || camZ > DOOR_Z2) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
+    }
+
+    // Corridor side walls
+    if (camX >= 10.0f && camX <= 14.0f) {
+        if (camZ < DOOR_Z1 + 0.2f || camZ > DOOR_Z2 - 0.2f) {
+            camX = prevCamX;
+            camZ = prevCamZ;
+        }
     }
 }
 
 void keyboard(unsigned char key, int, int) {
     float move = 0.50f;
     float turn = 0.10f;
+
+    prevCamX = camX;
+    prevCamZ = camZ;
 
     switch (key) {
         case 'w': camX += std::sin(camYaw) * move; camZ -= std::cos(camYaw) * move; break;
@@ -440,6 +623,12 @@ void keyboard(unsigned char key, int, int) {
         case 'd': camX += std::cos(camYaw) * move; camZ += std::sin(camYaw) * move; break;
         case 'j': camYaw -= turn; break;
         case 'l': camYaw += turn; break;
+        case 'e':
+        case 'E':
+            if (nearestArtworkIndex >= 0) {
+                showInfoPanel = !showInfoPanel;
+            }
+            break;
         case 27: std::exit(0);
     }
 
@@ -455,15 +644,16 @@ void init() {
     prepareArtworks();
 
     std::cout << "Prepared " << gallery.size() << " paintings.\n";
-    std::cout << "Walk to the right side of Room 1 to enter the corridor.\n";
+    std::cout << "Walk right to move from Room 1 to Room 2.\n";
+    std::cout << "Press E near a painting to inspect it.\n";
 }
 
 int main(int argc, char** argv) {
     try {
         glutInit(&argc, argv);
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-        glutInitWindowSize(1280, 800);
-        glutCreateWindow("3D Art Gallery - Two Connected Rooms");
+        glutInitWindowSize(1200, 800);
+        glutCreateWindow("3D Art Gallery - Interactive");
 
         init();
 
