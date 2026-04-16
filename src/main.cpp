@@ -27,21 +27,35 @@ struct Artwork {
     GLuint textureID = 0;
     float x = 0.0f;
     float y = 2.8f;
-    float z = -9.99f;
+    float z = -9.95f;
     float drawWidth = 2.5f;
     float drawHeight = 2.0f;
+
+    int room = 1;
 };
 
 // Camera
 float camX = 0.0f;
 float camY = 2.0f;
-float camZ = 8.0f;
+float camZ = 6.5f;
 float camYaw = 0.0f;
 
 // Gallery
 std::vector<Artwork> gallery;
 
-std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 5) {
+// Room layout
+const float ROOM1_CENTER_X = 0.0f;
+const float ROOM2_CENTER_X = 24.0f;
+const float ROOM_HALF_W    = 10.0f;
+const float ROOM_HALF_D    = 10.0f;
+const float ROOM_H         = 6.0f;
+
+// Door / corridor layout
+const float DOOR_Z1 = -4.0f;
+const float DOOR_Z2 =  4.0f;
+const float DOOR_TOP = 4.4f;
+
+std::vector<Artwork> loadGallery(const std::string& path, int maxItems = 10) {
     std::ifstream file(path);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open JSON file: " + path);
@@ -110,7 +124,8 @@ GLuint loadTexture(const char* path) {
 }
 
 void prepareArtworks() {
-    const float positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
+    const float room1Positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
+    const float room2Positions[5] = { -6.0f, -3.0f, 0.0f, 3.0f, 6.0f };
 
     for (size_t i = 0; i < gallery.size(); i++) {
         Artwork& art = gallery[i];
@@ -135,9 +150,17 @@ void prepareArtworks() {
 
         art.drawWidth = w;
         art.drawHeight = h;
-        art.x = positions[i];
         art.y = 2.8f;
-        art.z = -9.95f;
+
+        if (i < 5) {
+            art.room = 1;
+            art.x = ROOM1_CENTER_X + room1Positions[i];
+            art.z = -9.95f;
+        } else {
+            art.room = 2;
+            art.x = ROOM2_CENTER_X + room2Positions[i - 5];
+            art.z = -9.95f;
+        }
 
         art.textureID = loadTexture(art.image.c_str());
     }
@@ -165,62 +188,160 @@ void drawPedestal(float cx, float cy, float cz, float w, float h, float d) {
 
     glColor3f(0.82f, 0.82f, 0.80f);
 
-    // front
     drawQuad(x1, y1, z2, x2, y1, z2, x2, y2, z2, x1, y2, z2);
-    // back
     drawQuad(x2, y1, z1, x1, y1, z1, x1, y2, z1, x2, y2, z1);
-    // left
     drawQuad(x1, y1, z1, x1, y1, z2, x1, y2, z2, x1, y2, z1);
-    // right
     drawQuad(x2, y1, z2, x2, y1, z1, x2, y2, z1, x2, y2, z2);
-    // top
     drawQuad(x1, y2, z1, x2, y2, z1, x2, y2, z2, x1, y2, z2);
 }
 
-void drawRoom() {
+void drawFrontWallWithOpening(float cx) {
+    float left   = cx - ROOM_HALF_W;
+    float right  = cx + ROOM_HALF_W;
+    float frontZ = ROOM_HALF_D;
+
+    glColor3f(0.89f, 0.88f, 0.84f);
+    drawQuad(left, 0.0f, frontZ, cx - 3.0f, 0.0f, frontZ, cx - 3.0f, ROOM_H, frontZ, left, ROOM_H, frontZ);
+    drawQuad(cx + 3.0f, 0.0f, frontZ, right, 0.0f, frontZ, right, ROOM_H, frontZ, cx + 3.0f, ROOM_H, frontZ);
+    drawQuad(cx - 3.0f, 4.2f, frontZ, cx + 3.0f, 4.2f, frontZ, cx + 3.0f, ROOM_H, frontZ, cx - 3.0f, ROOM_H, frontZ);
+}
+
+void drawLeftWallSolid(float cx) {
+    float left = cx - ROOM_HALF_W;
+    drawQuad(left, 0.0f, -ROOM_HALF_D, left, 0.0f, ROOM_HALF_D, left, ROOM_H, ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
+}
+
+void drawRightWallSolid(float cx) {
+    float right = cx + ROOM_HALF_W;
+    drawQuad(right, 0.0f, ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D);
+}
+
+void drawRightWallWithDoor(float cx) {
+    float x = cx + ROOM_HALF_W;
+
+    glColor3f(0.91f, 0.90f, 0.86f);
+    // lower front section
+    drawQuad(x, 0.0f, ROOM_HALF_D, x, 0.0f, DOOR_Z2, x, ROOM_H, DOOR_Z2, x, ROOM_H, ROOM_HALF_D);
+    // lower back section
+    drawQuad(x, 0.0f, DOOR_Z1, x, 0.0f, -ROOM_HALF_D, x, ROOM_H, -ROOM_HALF_D, x, ROOM_H, DOOR_Z1);
+    // top above doorway
+    drawQuad(x, DOOR_TOP, DOOR_Z1, x, DOOR_TOP, DOOR_Z2, x, ROOM_H, DOOR_Z2, x, ROOM_H, DOOR_Z1);
+}
+
+void drawLeftWallWithDoor(float cx) {
+    float x = cx - ROOM_HALF_W;
+
+    glColor3f(0.91f, 0.90f, 0.86f);
+    // lower back section
+    drawQuad(x, 0.0f, -ROOM_HALF_D, x, 0.0f, DOOR_Z1, x, ROOM_H, DOOR_Z1, x, ROOM_H, -ROOM_HALF_D);
+    // lower front section
+    drawQuad(x, 0.0f, DOOR_Z2, x, 0.0f, ROOM_HALF_D, x, ROOM_H, ROOM_HALF_D, x, ROOM_H, DOOR_Z2);
+    // top above doorway
+    drawQuad(x, DOOR_TOP, DOOR_Z2, x, DOOR_TOP, DOOR_Z1, x, ROOM_H, DOOR_Z1, x, ROOM_H, DOOR_Z2);
+}
+
+void drawBaseTrim(float cx) {
+    float left   = cx - ROOM_HALF_W;
+    float right  = cx + ROOM_HALF_W;
+
+    glColor3f(0.55f, 0.45f, 0.35f);
+    drawQuad(left, 0.0f, -ROOM_HALF_D + 0.02f, right, 0.0f, -ROOM_HALF_D + 0.02f, right, 0.25f, -ROOM_HALF_D + 0.02f, left, 0.25f, -ROOM_HALF_D + 0.02f);
+    drawQuad(left + 0.02f, 0.0f, -ROOM_HALF_D, left + 0.02f, 0.0f, ROOM_HALF_D, left + 0.02f, 0.25f, ROOM_HALF_D, left + 0.02f, 0.25f, -ROOM_HALF_D);
+    drawQuad(right - 0.02f, 0.0f, ROOM_HALF_D, right - 0.02f, 0.0f, -ROOM_HALF_D, right - 0.02f, 0.25f, -ROOM_HALF_D, right - 0.02f, 0.25f, ROOM_HALF_D);
+}
+
+void drawRoomShellRoom1() {
+    float left   = ROOM1_CENTER_X - ROOM_HALF_W;
+    float right  = ROOM1_CENTER_X + ROOM_HALF_W;
+
     // Floor
     glColor3f(0.68f, 0.68f, 0.66f);
-    drawQuad(-10.0f, 0.0f, -10.0f, 10.0f, 0.0f, -10.0f, 10.0f, 0.0f, 10.0f, -10.0f, 0.0f, 10.0f);
+    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
 
     // Ceiling
     glColor3f(0.95f, 0.95f, 0.93f);
-    drawQuad(-10.0f, 6.0f, 10.0f, 10.0f, 6.0f, 10.0f, 10.0f, 6.0f, -10.0f, -10.0f, 6.0f, -10.0f);
+    drawQuad(left, ROOM_H, ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
     // Back wall
     glColor3f(0.90f, 0.89f, 0.84f);
-    drawQuad(-10.0f, 0.0f, -10.0f, 10.0f, 0.0f, -10.0f, 10.0f, 6.0f, -10.0f, -10.0f, 6.0f, -10.0f);
+    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
 
-    // Left wall
+    // Left wall solid
     glColor3f(0.91f, 0.90f, 0.86f);
-    drawQuad(-10.0f, 0.0f, -10.0f, -10.0f, 0.0f, 10.0f, -10.0f, 6.0f, 10.0f, -10.0f, 6.0f, -10.0f);
+    drawLeftWallSolid(ROOM1_CENTER_X);
 
-    // Right wall
-    glColor3f(0.91f, 0.90f, 0.86f);
-    drawQuad(10.0f, 0.0f, 10.0f, 10.0f, 0.0f, -10.0f, 10.0f, 6.0f, -10.0f, 10.0f, 6.0f, 10.0f);
+    // Right wall with side doorway
+    drawRightWallWithDoor(ROOM1_CENTER_X);
 
-    // Front wall, split into two sections with middle opening
-    glColor3f(0.89f, 0.88f, 0.84f);
-    // left section
-    drawQuad(-10.0f, 0.0f, 10.0f, -3.0f, 0.0f, 10.0f, -3.0f, 6.0f, 10.0f, -10.0f, 6.0f, 10.0f);
-    // right section
-    drawQuad(3.0f, 0.0f, 10.0f, 10.0f, 0.0f, 10.0f, 10.0f, 6.0f, 10.0f, 3.0f, 6.0f, 10.0f);
-    // top section above doorway
-    drawQuad(-3.0f, 4.2f, 10.0f, 3.0f, 4.2f, 10.0f, 3.0f, 6.0f, 10.0f, -3.0f, 6.0f, 10.0f);
+    // Front wall with opening
+    drawFrontWallWithOpening(ROOM1_CENTER_X);
 
-    // Baseboards / trim near floor
-    glColor3f(0.55f, 0.45f, 0.35f);
-    // back trim
-    drawQuad(-10.0f, 0.0f, -9.98f, 10.0f, 0.0f, -9.98f, 10.0f, 0.25f, -9.98f, -10.0f, 0.25f, -9.98f);
-    // left trim
-    drawQuad(-9.98f, 0.0f, -10.0f, -9.98f, 0.0f, 10.0f, -9.98f, 0.25f, 10.0f, -9.98f, 0.25f, -10.0f);
-    // right trim
-    drawQuad(9.98f, 0.0f, 10.0f, 9.98f, 0.0f, -10.0f, 9.98f, 0.25f, -10.0f, 9.98f, 0.25f, 10.0f);
-
-    // Center pedestal
-    drawPedestal(0.0f, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
+    // Trim
+    drawBaseTrim(ROOM1_CENTER_X);
 }
 
-void drawFrame(float centerX, float centerY, float z, float w, float h) {
+void drawRoomShellRoom2() {
+    float left   = ROOM2_CENTER_X - ROOM_HALF_W;
+    float right  = ROOM2_CENTER_X + ROOM_HALF_W;
+
+    // Floor
+    glColor3f(0.68f, 0.68f, 0.66f);
+    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, 0.0f, ROOM_HALF_D, left, 0.0f, ROOM_HALF_D);
+
+    // Ceiling
+    glColor3f(0.95f, 0.95f, 0.93f);
+    drawQuad(left, ROOM_H, ROOM_HALF_D, right, ROOM_H, ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
+
+    // Back wall
+    glColor3f(0.90f, 0.89f, 0.84f);
+    drawQuad(left, 0.0f, -ROOM_HALF_D, right, 0.0f, -ROOM_HALF_D, right, ROOM_H, -ROOM_HALF_D, left, ROOM_H, -ROOM_HALF_D);
+
+    // Left wall with side doorway
+    drawLeftWallWithDoor(ROOM2_CENTER_X);
+
+    // Right wall solid
+    glColor3f(0.91f, 0.90f, 0.86f);
+    drawRightWallSolid(ROOM2_CENTER_X);
+
+    // Front wall with opening
+    drawFrontWallWithOpening(ROOM2_CENTER_X);
+
+    // Trim
+    drawBaseTrim(ROOM2_CENTER_X);
+}
+
+void drawConnectingCorridor() {
+    float leftX = ROOM1_CENTER_X + ROOM_HALF_W;
+    float rightX = ROOM2_CENTER_X - ROOM_HALF_W;
+    float z1 = DOOR_Z1;
+    float z2 = DOOR_Z2;
+
+    // floor
+    glColor3f(0.66f, 0.66f, 0.64f);
+    drawQuad(leftX, 0.0f, z1, rightX, 0.0f, z1, rightX, 0.0f, z2, leftX, 0.0f, z2);
+
+    // ceiling
+    glColor3f(0.94f, 0.94f, 0.92f);
+    drawQuad(leftX, ROOM_H, z2, rightX, ROOM_H, z2, rightX, ROOM_H, z1, leftX, ROOM_H, z1);
+
+    // corridor front side wall
+    glColor3f(0.90f, 0.89f, 0.85f);
+    drawQuad(leftX, 0.0f, z2, rightX, 0.0f, z2, rightX, ROOM_H, z2, leftX, ROOM_H, z2);
+
+    // corridor back side wall
+    drawQuad(rightX, 0.0f, z1, leftX, 0.0f, z1, leftX, ROOM_H, z1, rightX, ROOM_H, z1);
+}
+
+void drawRoom() {
+    drawRoomShellRoom1();
+    drawRoomShellRoom2();
+    drawConnectingCorridor();
+
+    drawPedestal(ROOM1_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
+    drawPedestal(ROOM2_CENTER_X, 0.0f, -1.5f, 2.0f, 1.2f, 2.0f);
+}
+
+void drawFrameBack(float centerX, float centerY, float z, float w, float h) {
     float x1 = centerX - w / 2.0f;
     float x2 = centerX + w / 2.0f;
     float y1 = centerY - h / 2.0f;
@@ -258,7 +379,7 @@ void drawPaintings() {
         glEnd();
 
         glBindTexture(GL_TEXTURE_2D, 0);
-        drawFrame(art.x, art.y, art.z, art.drawWidth, art.drawHeight);
+        drawFrameBack(art.x, art.y, art.z, art.drawWidth, art.drawHeight);
     }
 
     glDisable(GL_TEXTURE_2D);
@@ -285,26 +406,32 @@ void reshape(int w, int h) {
     glViewport(0, 0, w, h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(60.0, static_cast<float>(w) / static_cast<float>(h), 0.1, 100.0);
+    gluPerspective(65.0f, static_cast<float>(w) / static_cast<float>(h), 0.1f, 150.0f);
     glMatrixMode(GL_MODELVIEW);
 }
 
 void clampCamera() {
     if (camX < -8.7f) camX = -8.7f;
-    if (camX >  8.7f) camX =  8.7f;
+    if (camX > 32.7f) camX = 32.7f;
     if (camZ < -8.0f) camZ = -8.0f;
-    if (camZ >  8.7f) camZ =  8.7f;
+    if (camZ > 8.7f) camZ = 8.7f;
 
-    // avoid pedestal area roughly
+    // pedestal room 1
     if (camX > -1.5f && camX < 1.5f && camZ > -3.0f && camZ < 0.3f) {
+        if (camZ < -1.35f) camZ = -3.0f;
+        else camZ = 0.3f;
+    }
+
+    // pedestal room 2
+    if (camX > 22.5f && camX < 25.5f && camZ > -3.0f && camZ < 0.3f) {
         if (camZ < -1.35f) camZ = -3.0f;
         else camZ = 0.3f;
     }
 }
 
 void keyboard(unsigned char key, int, int) {
-    float move = 0.35f;
-    float turn = 0.08f;
+    float move = 0.50f;
+    float turn = 0.10f;
 
     switch (key) {
         case 'w': camX += std::sin(camYaw) * move; camZ -= std::cos(camYaw) * move; break;
@@ -324,18 +451,19 @@ void init() {
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
 
-    gallery = loadGallery("data/gallery.json", 5);
+    gallery = loadGallery("data/gallery.json", 10);
     prepareArtworks();
 
     std::cout << "Prepared " << gallery.size() << " paintings.\n";
+    std::cout << "Walk to the right side of Room 1 to enter the corridor.\n";
 }
 
 int main(int argc, char** argv) {
     try {
         glutInit(&argc, argv);
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-        glutInitWindowSize(1000, 700);
-        glutCreateWindow("3D Art Gallery");
+        glutInitWindowSize(1280, 800);
+        glutCreateWindow("3D Art Gallery - Two Connected Rooms");
 
         init();
 

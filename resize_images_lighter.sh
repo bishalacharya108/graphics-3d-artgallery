@@ -12,7 +12,7 @@ for img in assets/*.jpg; do
         -gaussian-blur 0x0.5 \
         -sampling-factor 4:2:0 \
         -interlace Plane \
-        -quality 70 \
+        -quality 68 \
         -colors 128 \
         -dither FloydSteinberg \
         "assets_small/$filename"
