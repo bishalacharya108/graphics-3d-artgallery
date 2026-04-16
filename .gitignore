@@ -22,7 +22,7 @@ Thumbs.db
 
 tmp/
 temp/
-
+assets_small/
 download_images.php
 assets/
 *.jpg
