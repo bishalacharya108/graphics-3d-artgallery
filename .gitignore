@@ -24,8 +24,5 @@ tmp/
 temp/
 
 download_images.php
-
- assets/
-
-
-.jpg
+assets/
+*.jpg
