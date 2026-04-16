@@ -45,6 +45,13 @@ float camYaw = 0.0f;
 float prevCamX = 0.0f;
 float prevCamZ = 6.5f;
 
+// Window size
+int windowWidth = 1200;
+int windowHeight = 800;
+
+// Input state
+bool keyStates[256] = {false};
+
 // Gallery
 std::vector<Artwork> gallery;
 
@@ -234,6 +241,18 @@ void drawBitmapText2D(float x, float y, const std::string& text) {
 std::string truncateTitle(const std::string& s, size_t maxLen = 18) {
     if (s.size() <= maxLen) return s;
     return s.substr(0, maxLen - 3) + "...";
+}
+
+std::string truncateLine(const std::string& s, size_t maxLen = 42) {
+    if (s.empty()) return "(no description)";
+    if (s.size() <= maxLen) return s;
+    return s.substr(0, maxLen - 3) + "...";
+}
+
+std::string currentRoomName() {
+    if (camX < 10.0f) return "Landscape Hall";
+    if (camX > 14.0f) return "Architecture Hall";
+    return "Connecting Corridor";
 }
 
 // -------------------- Room geometry --------------------
@@ -451,62 +470,155 @@ void drawRoomTitles() {
 }
 
 // -------------------- Overlay --------------------
+void worldToMiniMap(float worldX, float worldZ,
+                    float mapX, float mapY,
+                    float worldMinX, float worldMaxX,
+                    float worldMinZ, float worldMaxZ,
+                    float mapW, float mapH,
+                    float& outX, float& outY) {
+    float nx = (worldX - worldMinX) / (worldMaxX - worldMinX);
+    float nz = (worldZ - worldMinZ) / (worldMaxZ - worldMinZ);
+
+    outX = mapX + nx * mapW;
+    outY = mapY + mapH - (nz * mapH);
+}
+
+
+void drawMiniMap() {
+    const float mapW = 260.0f;
+    const float mapH = 140.0f;
+    const float mapX = windowWidth - mapW - 20.0f;
+    const float mapY = windowHeight - mapH - 20.0f;
+
+    // World bounds covering the whole museum
+    const float worldMinX = -10.0f;
+    const float worldMaxX = 34.0f;
+    const float worldMinZ = -10.0f;
+    const float worldMaxZ = 10.0f;
+
+    // Background
+    glColor3f(0.08f, 0.08f, 0.10f);
+    glBegin(GL_QUADS);
+        glVertex2f(mapX, mapY);
+        glVertex2f(mapX + mapW, mapY);
+        glVertex2f(mapX + mapW, mapY + mapH);
+        glVertex2f(mapX, mapY + mapH);
+    glEnd();
+
+    glColor3f(0.85f, 0.85f, 0.85f);
+    glLineWidth(2.0f);
+
+    auto drawWorldRect = [&](float x1, float z1, float x2, float z2) {
+        float sx1, sy1, sx2, sy2;
+        worldToMiniMap(x1, z1, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, sx1, sy1);
+        worldToMiniMap(x2, z2, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, sx2, sy2);
+
+        float left   = std::min(sx1, sx2);
+        float right  = std::max(sx1, sx2);
+        float top    = std::min(sy1, sy2);
+        float bottom = std::max(sy1, sy2);
+
+        glBegin(GL_LINE_LOOP);
+            glVertex2f(left,  top);
+            glVertex2f(right, top);
+            glVertex2f(right, bottom);
+            glVertex2f(left,  bottom);
+        glEnd();
+    };
+
+    // Room 1 outline: x [-10, 10], z [-10, 10]
+    drawWorldRect(-10.0f, -10.0f, 10.0f, 10.0f);
+
+    // Corridor outline: x [10, 14], z [DOOR_Z1, DOOR_Z2]
+    drawWorldRect(10.0f, DOOR_Z1, 14.0f, DOOR_Z2);
+
+    // Room 2 outline: x [14, 34], z [-10, 10]
+    drawWorldRect(14.0f, -10.0f, 34.0f, 10.0f);
+
+    // Pedestals
+    glColor3f(0.65f, 0.65f, 0.65f);
+    drawWorldRect(-1.0f, -2.5f, 1.0f, -0.5f);
+    drawWorldRect(23.0f, -2.5f, 25.0f, -0.5f);
+
+    // Player dot
+    float px, py;
+    worldToMiniMap(camX, camZ, mapX, mapY, worldMinX, worldMaxX, worldMinZ, worldMaxZ, mapW, mapH, px, py);
+
+    glColor3f(0.95f, 0.30f, 0.30f);
+    glPointSize(8.0f);
+    glBegin(GL_POINTS);
+        glVertex2f(px, py);
+    glEnd();
+
+    // Facing direction
+    glColor3f(0.95f, 0.90f, 0.40f);
+    glBegin(GL_LINES);
+        glVertex2f(px, py);
+        glVertex2f(px + std::sin(camYaw) * 12.0f, py - std::cos(camYaw) * 12.0f);
+    glEnd();
+
+    // Nearest artwork dot
+    if (nearestArtworkIndex >= 0) {
+        float ax, ay;
+        worldToMiniMap(
+            gallery[nearestArtworkIndex].x,
+            gallery[nearestArtworkIndex].z,
+            mapX, mapY,
+            worldMinX, worldMaxX,
+            worldMinZ, worldMaxZ,
+            mapW, mapH,
+            ax, ay
+        );
+
+        glColor3f(0.20f, 0.95f, 0.30f);
+        glPointSize(7.0f);
+        glBegin(GL_POINTS);
+            glVertex2f(ax, ay);
+        glEnd();
+    }
+
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawBitmapText2D(mapX + 10.0f, mapY + mapH - 18.0f, "Mini Map");
+}
 
 void drawInfoPanel() {
     if (!showInfoPanel || nearestArtworkIndex < 0) return;
 
     const Artwork& art = gallery[nearestArtworkIndex];
 
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    gluOrtho2D(0, 1200, 0, 800);
-
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-
-    glDisable(GL_DEPTH_TEST);
-
     glColor3f(0.08f, 0.08f, 0.10f);
     glBegin(GL_QUADS);
-        glVertex2f(720.0f, 540.0f);
-        glVertex2f(1160.0f, 540.0f);
+        glVertex2f(700.0f, 500.0f);
+        glVertex2f(1160.0f, 500.0f);
         glVertex2f(1160.0f, 770.0f);
-        glVertex2f(720.0f, 770.0f);
+        glVertex2f(700.0f, 770.0f);
     glEnd();
 
     glColor3f(0.95f, 0.85f, 0.35f);
     glLineWidth(2.0f);
     glBegin(GL_LINE_LOOP);
-        glVertex2f(720.0f, 540.0f);
-        glVertex2f(1160.0f, 540.0f);
+        glVertex2f(700.0f, 500.0f);
+        glVertex2f(1160.0f, 500.0f);
         glVertex2f(1160.0f, 770.0f);
-        glVertex2f(720.0f, 770.0f);
+        glVertex2f(700.0f, 770.0f);
     glEnd();
 
     glColor3f(1.0f, 1.0f, 1.0f);
-    drawBitmapText2D(740.0f, 740.0f, "Artwork Details");
-    drawBitmapText2D(740.0f, 705.0f, "Title: " + art.title);
-    drawBitmapText2D(740.0f, 675.0f, "Category: " + art.category);
-    drawBitmapText2D(740.0f, 645.0f, "Source: " + art.source);
-    drawBitmapText2D(740.0f, 615.0f, "License: " + art.license);
-    drawBitmapText2D(740.0f, 585.0f, "Room: " + std::to_string(art.room));
-    drawBitmapText2D(740.0f, 555.0f, "Press E to close");
-
-    glEnable(GL_DEPTH_TEST);
-
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
+    drawBitmapText2D(720.0f, 740.0f, "Artwork Details");
+    drawBitmapText2D(720.0f, 705.0f, "Title: " + art.title);
+    drawBitmapText2D(720.0f, 675.0f, "Category: " + art.category);
+    drawBitmapText2D(720.0f, 645.0f, "Source: " + art.source);
+    drawBitmapText2D(720.0f, 615.0f, "License: " + art.license);
+    drawBitmapText2D(720.0f, 585.0f, "Room: " + std::to_string(art.room));
+    drawBitmapText2D(720.0f, 555.0f, "Description: " + truncateLine(art.description, 40));
+    drawBitmapText2D(720.0f, 525.0f, "Press E to close");
 }
 
 void drawOverlay() {
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
-    gluOrtho2D(0, 1200, 0, 800);
+    gluOrtho2D(0, windowWidth, 0, windowHeight);
 
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
@@ -515,13 +627,27 @@ void drawOverlay() {
     glDisable(GL_DEPTH_TEST);
     glColor3f(1.0f, 1.0f, 1.0f);
 
-    drawBitmapText2D(20.0f, 770.0f, "WASD: move   J/L: turn   E: inspect artwork   ESC: quit");
-    drawBitmapText2D(20.0f, 745.0f, "Room 1: Landscapes   Room 2: Architecture");
+    drawBitmapText2D(20.0f, windowHeight - 30.0f, "WASD: move   J/L: turn   E: inspect artwork   ESC: quit");
+    drawBitmapText2D(20.0f, windowHeight - 55.0f, "Current Room: " + currentRoomName());
 
     if (nearestArtworkIndex >= 0) {
         std::string msg = "Nearest: " + truncateTitle(gallery[nearestArtworkIndex].title, 28);
-        drawBitmapText2D(20.0f, 720.0f, msg);
+        drawBitmapText2D(20.0f, windowHeight - 80.0f, msg);
+        if (!showInfoPanel) {
+            drawBitmapText2D(20.0f, windowHeight - 105.0f, "Press E to inspect");
+        }
     }
+
+    // crosshair
+    float cx = windowWidth / 2.0f;
+    float cy = windowHeight / 2.0f;
+    glBegin(GL_LINES);
+        glVertex2f(cx - 8.0f, cy); glVertex2f(cx + 8.0f, cy);
+        glVertex2f(cx, cy - 8.0f); glVertex2f(cx, cy + 8.0f);
+    glEnd();
+
+    drawMiniMap();
+    drawInfoPanel();
 
     glEnable(GL_DEPTH_TEST);
 
@@ -529,8 +655,6 @@ void drawOverlay() {
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
-
-    drawInfoPanel();
 }
 
 // -------------------- Main render --------------------
@@ -557,6 +681,8 @@ void display() {
 
 void reshape(int w, int h) {
     if (h == 0) h = 1;
+    windowWidth = w;
+    windowHeight = h;
 
     glViewport(0, 0, w, h);
     glMatrixMode(GL_PROJECTION);
@@ -609,31 +735,72 @@ void clampCamera() {
     }
 }
 
-void keyboard(unsigned char key, int, int) {
-    float move = 0.50f;
-    float turn = 0.10f;
+void updateMovement() {
+    float move = 0.12f;
+    float turn = 0.035f;
 
     prevCamX = camX;
     prevCamZ = camZ;
 
+    bool moved = false;
+
+    if (keyStates['w'] || keyStates['W']) {
+        camX += std::sin(camYaw) * move;
+        camZ -= std::cos(camYaw) * move;
+        moved = true;
+    }
+    if (keyStates['s'] || keyStates['S']) {
+        camX -= std::sin(camYaw) * move;
+        camZ += std::cos(camYaw) * move;
+        moved = true;
+    }
+    if (keyStates['a'] || keyStates['A']) {
+        camX -= std::cos(camYaw) * move;
+        camZ -= std::sin(camYaw) * move;
+        moved = true;
+    }
+    if (keyStates['d'] || keyStates['D']) {
+        camX += std::cos(camYaw) * move;
+        camZ += std::sin(camYaw) * move;
+        moved = true;
+    }
+    if (keyStates['j'] || keyStates['J']) {
+        camYaw -= turn;
+    }
+    if (keyStates['l'] || keyStates['L']) {
+        camYaw += turn;
+    }
+
+    if (moved) {
+        clampCamera();
+    }
+
+    glutPostRedisplay();
+}
+
+void idle() {
+    updateMovement();
+}
+
+void keyboardDown(unsigned char key, int, int) {
+    keyStates[key] = true;
+
     switch (key) {
-        case 'w': camX += std::sin(camYaw) * move; camZ -= std::cos(camYaw) * move; break;
-        case 's': camX -= std::sin(camYaw) * move; camZ += std::cos(camYaw) * move; break;
-        case 'a': camX -= std::cos(camYaw) * move; camZ -= std::sin(camYaw) * move; break;
-        case 'd': camX += std::cos(camYaw) * move; camZ += std::sin(camYaw) * move; break;
-        case 'j': camYaw -= turn; break;
-        case 'l': camYaw += turn; break;
         case 'e':
         case 'E':
             if (nearestArtworkIndex >= 0) {
                 showInfoPanel = !showInfoPanel;
             }
             break;
-        case 27: std::exit(0);
+        case 27:
+            std::exit(0);
     }
 
-    clampCamera();
     glutPostRedisplay();
+}
+
+void keyboardUp(unsigned char key, int, int) {
+    keyStates[key] = false;
 }
 
 void init() {
@@ -652,14 +819,16 @@ int main(int argc, char** argv) {
     try {
         glutInit(&argc, argv);
         glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-        glutInitWindowSize(1200, 800);
-        glutCreateWindow("3D Art Gallery - Interactive");
+        glutInitWindowSize(windowWidth, windowHeight);
+        glutCreateWindow("3D Art Gallery - Polished");
 
         init();
 
         glutDisplayFunc(display);
         glutReshapeFunc(reshape);
-        glutKeyboardFunc(keyboard);
+        glutKeyboardFunc(keyboardDown);
+        glutKeyboardUpFunc(keyboardUp);
+        glutIdleFunc(idle);
 
         glutMainLoop();
     } catch (const std::exception& e) {
